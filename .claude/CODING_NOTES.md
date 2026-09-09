@@ -78,6 +78,10 @@ exe = EXE(
 ## Date: 2025-12-16
 This note was created based on issues encountered with PyInstaller executables remaining locked after closing.
 
+## Network/Socket Security
+
+- **Never bind a socket to the IPv6/IPv4 wildcard (`::` / `0.0.0.0`) just to get dual-stack behavior.** `("::", port)` with `IPV6_V6ONLY=0` listens on every network interface, not just loopback — exposing local-only APIs (and any credentials they proxy) to the whole LAN. For loopback-only dual-stack, bind two explicit sockets (`127.0.0.1` and `::1`) and pass both to the server (e.g. `uvicorn.Server(config).run(sockets=[sock_v4, sock_v6])`), rather than one wildcard socket.
+
 ## General Style Notes
 
 - **Keep lines under 120 characters.** Long lines are hard to review side-by-side in a diff or split editor pane, and tend to signal a line doing too many things at once. Wrap or break up expressions rather than letting them run long.

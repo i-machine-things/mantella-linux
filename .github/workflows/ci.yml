@@ -11,6 +11,7 @@ jobs:
   lint:
     name: Lint & Security
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +54,7 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -66,13 +68,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r tests/requirements-ci.txt
           pip install -r tests/requirements-test.txt
+          pip install pytest-timeout
 
       - name: Run tests
-        run: pytest --tb=short -q -m "not requires_audio and not requires_external_exe and not requires_llm"
-
-      - name: No tests configured
-        if: steps.check.outputs.has_requirements == 'false'
-        run: echo "No requirements.txt found — skipping tests. Add requirements.txt/requirements-dev.txt and a tests/ dir to enable this job."
+        run: pytest --tb=short -q --timeout=120 -m "not requires_audio and not requires_external_exe and not requires_llm"
 
   # ---------------------------------------------------------------------------
   # Build — replace with your project's actual build steps.
@@ -81,6 +80,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest  # TODO: change runner if needed (e.g. windows-latest)
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4

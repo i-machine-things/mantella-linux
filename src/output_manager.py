@@ -300,8 +300,12 @@ class ChatManager:
             messages.add_message(tool_result_message)
     
     @utils.time_it
-    async def process_response(self, active_character: Character, blocking_queue: SentenceQueue, messages : message_thread, characters: Characters, actions: list[Action], tools: list[dict] | None, stop_event: asyncio.Event, game: Gameable | None = None):
+    async def process_response(self, active_character: Character, blocking_queue: SentenceQueue, messages : message_thread, characters: Characters, actions: list[Action], tools: list[dict] | None, stop_event: asyncio.Event | None = None, game: Gameable | None = None):
         """Stream response from LLM one sentence at a time"""
+        if stop_event is None:
+            # generate_response() always passes its own per-generation token; this
+            # fallback only matters for callers (e.g. tests) invoking this directly.
+            stop_event = asyncio.Event()
         with create_span_from_thread("process_response") as span:
             span.set_attribute("active_character.name", active_character.name)
 

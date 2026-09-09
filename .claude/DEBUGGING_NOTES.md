@@ -410,16 +410,16 @@ order encountered:
     3. **Restart the xVASynth server process** after patching — same
        "no hot reload" rule as Mantella itself.
     Verify the fix with a line that forces the fallback path, e.g. via
-    `~/Games/Mantella/test_pipeline.py --espeak-test` (see below), or watch
+    `~/Games/Mantella/check_pipeline.py --espeak-test` (see below), or watch
     `server.log` for a `POST /synthesize` that used to crash now completing
     normally.
 
 ## Standalone pipeline test (no Skyrim required)
 
-18. `~/Games/Mantella/test_pipeline.py` exercises LLM → TTS directly, without
+18. `~/Games/Mantella/check_pipeline.py` exercises LLM → TTS directly, without
     the game, MO2, or Proton in the loop at all — useful for isolating
     "is the backend actually broken" from "is delivery/playback to the game
-    broken". Run with `./MantellaEnv/bin/python test_pipeline.py` (add
+    broken". Run with `./MantellaEnv/bin/python check_pipeline.py` (add
     `--espeak-test` to force a line that requires the eSpeak G2P fallback,
     see #17). It prints the LLM's raw reply, then synthesizes it and prints
     the resulting `.wav` path — play it directly with `paplay <path>` to

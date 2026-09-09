@@ -2,6 +2,10 @@
 
 > **Style rule:** Notes must be clear and concise — 300 characters or less each. Group by topic, not by date. Whenever a PR review (CodeRabbit or human) catches a mistake, add or amend a note here right away so it isn't repeated.
 
+## Pytest Discovery
+
+- **Never name a standalone script (meant to be run directly, not as a unit test) `test_*.py` anywhere in the repo** — pytest's default discovery collects any `test_*.py` file repo-wide, not just under `tests/`, and *imports* it during collection, executing all top-level code immediately (a live LLM call, opening the mic, etc.). Name manual/diagnostic scripts something else (`check_*.py`) or scope pytest's `testpaths` to the actual test directory.
+
 ## Resource Cleanup & Temporary Files
 
 **IMPORTANT**: Always add proper cleanup code in programs to prevent lingering temp files after closing.

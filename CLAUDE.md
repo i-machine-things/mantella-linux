@@ -16,7 +16,7 @@ Key files:
 - `src/config/definitions/*.py` — config value definitions and validators (several had hardcoded Windows path assumptions).
 - `.claude/DEBUGGING_NOTES.md` — a from-scratch log of every Linux/Proton-specific issue hit getting this running (Flatpak sandboxing, SKSE version compatibility, xVASynth's Windows-only dependency chain, audio routing, etc.) — read this before re-debugging something already solved.
 - `game-wrapper.sh` / `start-mantella.sh` — launch scripts that start the native Linux Mantella + xVASynth backends alongside Skyrim via Steam.
-- `test_pipeline.py` / `test_stt.py` — standalone scripts to test the LLM+TTS pipeline and mic/VAD capture without needing the game running.
+- `check_pipeline.py` / `check_stt.py` — standalone scripts to test the LLM+TTS pipeline and mic/VAD capture without needing the game running.
 
 Environment / deployment:
 - Runs on Debian Linux. Skyrim SE runs via Steam + Proton + Mod Organizer 2 (portable instance) inside its own Proton prefix.
@@ -103,8 +103,8 @@ CI runs automatically on every PR (`.github/workflows/ci.yml`): lint, security s
 
 Project-specific test instructions:
 - The existing `pytest` suite under `tests/` excludes anything marked `requires_audio`, `requires_external_exe`, or `requires_llm` in CI (no mic, no xVASynth server, no real API key available there) — run it locally the same way: `pytest --tb=short -q -m "not requires_audio and not requires_external_exe and not requires_llm"`.
-- For anything touching the LLM/TTS pipeline, also run `./MantellaEnv/bin/python test_pipeline.py` (add `--espeak-test` to force the eSpeak G2P fallback path) to verify against a live LLM + TTS server without needing Skyrim running.
-- For anything touching mic/VAD capture, run `./MantellaEnv/bin/python test_stt.py` and speak when prompted.
+- For anything touching the LLM/TTS pipeline, also run `./MantellaEnv/bin/python check_pipeline.py` (add `--espeak-test` to force the eSpeak G2P fallback path) to verify against a live LLM + TTS server without needing Skyrim running.
+- For anything touching mic/VAD capture, run `./MantellaEnv/bin/python check_stt.py` and speak when prompted.
 - Both backends (`main.py` on port 4999, xVASynth's `server.py` on port 8008) must be restarted after any change to their own source **and** after any `config.ini` edit — neither hot-reloads.
 
 ## Rule 4: Semantic Versioning

@@ -1,4 +1,5 @@
 import logging
+import socket
 import click
 from fastapi import FastAPI
 import uvicorn
@@ -58,4 +59,15 @@ class http_server:
         logger.log(25, 'https://art-from-the-machine.github.io/Mantella/pages/issues_qna')
         logger.log(24, '\nWaiting for player to select an NPC...')
     
-        uvicorn.run(self.__app, port=port)
+        # Bind a genuine dual-stack socket (both IPv4 and IPv6 loopback) ourselves:
+        # on this system "localhost" resolves to ::1 (IPv6) before 127.0.0.1, and
+        # the SKSE_HTTP plugin (running under Wine) uses the literal string
+        # "localhost" for some of its requests while using "127.0.0.1" for others.
+        # uvicorn's host="::" alone enables IPV6_V6ONLY by default here, which
+        # would silently drop the 127.0.0.1 connections instead. Explicitly
+        # disabling IPV6_V6ONLY gives us both on the single port the game expects.
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        sock.bind(("::", port))
+        uvicorn.run(self.__app, fd=sock.fileno())

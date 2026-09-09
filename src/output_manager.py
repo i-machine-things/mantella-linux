@@ -244,9 +244,20 @@ class ChatManager:
     @utils.time_it
     def stop_generation(self):
         """Stops the current generation and only returns once this stop has been successful
+
+        Bounded to avoid ever blocking forever: if __is_generating doesn't drop back to
+        False within a few seconds (e.g. a prior generation's cleanup got missed due to a
+        race between overlapping stop_generation() calls), give up waiting and clear the
+        stop-generation event anyway so the system can self-recover instead of leaving
+        every subsequent LLM call permanently aborted on its first chunk.
         """
         self.__stop_generation.set()
+        wait_start = time.time()
         while self.__is_generating:
+            if time.time() - wait_start > 5:
+                logger.warning('stop_generation() timed out waiting for is_generating to clear - forcing reset to avoid a stuck state.')
+                self.__is_generating = False
+                break
             time.sleep(0.01)
         self.__stop_generation.clear()
         return
@@ -328,10 +339,14 @@ class ChatManager:
                 active_client = self._get_per_character_client(active_character) if not is_multi_npc else self.__client
 
                 while not has_text_response and retries < max_retries:
+                    stopped_early = False
                     try:
                         start_time = time.time()
-                        async for item in active_client.streaming_call(messages=messages, is_multi_npc=is_multi_npc, tools=current_tools):
+                        agen = active_client.streaming_call(messages=messages, is_multi_npc=is_multi_npc, tools=current_tools)
+                        async for item in agen:
                             if self.__stop_generation.is_set():
+                                stopped_early = True
+                                await agen.aclose()
                                 break
                             if not item:
                                 continue
@@ -441,6 +456,8 @@ class ChatManager:
                                             blocking_queue.put(new_sentence)
                                             parsed_sentence = None
                                 if settings.stop_generation:
+                                    stopped_early = True
+                                    await agen.aclose()
                                     break
                                 if settings.interrupting_action:
                                     # If there is an interrupting action, stop the generation after the next sentence
@@ -472,13 +489,34 @@ class ChatManager:
                             self.__discarded_character_name = settings.discarded_character_name
                             logger.log(self.loglevel, f"LLM addressed unrecognized character '{settings.discarded_character_name}'")
 
+                        if not has_text_response and not collected_tool_calls and not stopped_early:
+                            # The LLM stream was consumed to natural completion (not aborted via
+                            # stop_generation) but produced neither text nor a tool call - a
+                            # genuinely empty completion, seen intermittently from providers even
+                            # without an error. The generator is already fully exhausted here
+                            # (not merely abandoned), so _generation_lock is guaranteed released
+                            # before we retry. Retry like a normal failure instead of silently
+                            # accepting a blank response.
+                            retries += 1
+                            logger.log(23, f"LLM returned an empty response with no error (attempt {retries}/{max_retries}).")
+                            if retries >= max_retries:
+                                logger.log(self.loglevel, f"Max retries reached ({retries}).")
+                                break
+                            logger.log(self.loglevel, 'Retrying due to empty LLM response...')
+                            await asyncio.sleep(1)
+                            continue
+
                         break  # Got text response or hit an error, exit loop
                                 
                     except Exception as e:
+                        try:
+                            await agen.aclose()
+                        except Exception:
+                            pass
                         retries += 1
                         utils.play_error_sound()
                         logger.error(f"LLM API Error: {e}")
-                        
+
                         error_response = "I can't find the right words at the moment."
                         new_sentence = self.generate_sentence(SentenceContent(active_character, error_response, SentenceTypeEnum.SPEECH, True))
                         blocking_queue.put(new_sentence)

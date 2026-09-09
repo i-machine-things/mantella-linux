@@ -4,7 +4,7 @@ pandas==1.5.3
 tiktoken==0.4.0
 httpx==0.27.2
 openai==2.8.0
-aiohttp==3.8.4
+aiohttp==3.14.3
 faster-whisper==1.0.3
 requests==2.31.0
 pyaudio==0.2.13

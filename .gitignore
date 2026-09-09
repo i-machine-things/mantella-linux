@@ -28,3 +28,6 @@ data/voice_model_data_log_xtts.csv
 .vscode/
 .coverage
 moonshine/
+piper/
+*.log
+*.pid

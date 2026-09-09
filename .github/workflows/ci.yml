@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, stable]
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint — flake8 (errors + undefined names) and bandit (medium/high severity)
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint & Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install tools
+        run: pip install flake8 bandit
+
+      - name: flake8
+        run: |
+          # E9 (syntax errors) and F821/F822/F823 (genuinely undefined names) only.
+          # The broader F401/F541/F841/F811 etc. are cosmetic pre-existing debt across
+          # a large forked codebase this repo doesn't own the style of - not something
+          # this CI should gate new PRs on.
+          flake8 \
+            --max-line-length=120 \
+            --select=E9,F821,F822,F823 \
+            --exclude=.git,__pycache__,build_scripts \
+            .
+
+      - name: bandit
+        run: |
+          # high severity only: this is a fork of a large pre-existing codebase
+          # with its own pre-existing medium-severity findings (mostly missing
+          # request timeouts) this CI doesn't own responsibility for cleaning up
+          # retroactively - gate new PRs on genuinely serious issues instead.
+          bandit -r . \
+            --exclude ./.git \
+            --severity-level high \
+            -q
+
+  # ---------------------------------------------------------------------------
+  # Tests
+  # Install system libs your project needs before running (e.g. libegl1 for
+  # PyQt6). Add QT_QPA_PLATFORM=offscreen if tests import Qt widgets.
+  # ---------------------------------------------------------------------------
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tests/requirements-ci.txt
+          pip install -r tests/requirements-test.txt
+          pip install pytest-timeout
+
+      - name: Run tests
+        run: pytest --tb=short -q --timeout=120 -m "not requires_audio and not requires_external_exe and not requires_llm"
+
+  # ---------------------------------------------------------------------------
+  # Build — replace with your project's actual build steps.
+  # Upload build artifacts with short retention so PRs are manually testable.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build
+    runs-on: ubuntu-latest  # TODO: change runner if needed (e.g. windows-latest)
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # TODO: add your build steps here
+      # - name: Install dependencies
+      #   run: pip install -r requirements.txt
+
+      # - name: Build
+      #   run: <your build command>
+
+      # - name: Upload artifact
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: build-pr-${{ github.event.pull_request.number }}
+      #     path: <output path>
+      #     retention-days: 7

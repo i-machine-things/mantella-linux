@@ -238,17 +238,40 @@ class ChatManager:
         if(not characters.last_added_character):
             return
         self.__is_generating = True
-        
-        asyncio.run(self.process_response(characters.last_added_character, blocking_queue, messages, characters, actions, tools, game))
-    
+
+        # Each generation gets its own cancellation token instead of reusing one shared
+        # Event. A stale generation that's merely slow (not truly stuck) must keep seeing
+        # its own token as cancelled even if a bounded stop_generation() wait times out and
+        # gives up early on a *different* (newer) generation - sharing one Event across
+        # calls let a resumed, already-cancelled coroutine mutate shared state as if it had
+        # never been cancelled.
+        my_stop_event = asyncio.Event()
+        self.__stop_generation = my_stop_event
+
+        asyncio.run(self.process_response(characters.last_added_character, blocking_queue, messages, characters, actions, tools, my_stop_event, game))
+
     @utils.time_it
     def stop_generation(self):
         """Stops the current generation and only returns once this stop has been successful
+
+        Bounded to avoid ever blocking forever: if __is_generating doesn't drop back to
+        False within a few seconds (e.g. a prior generation's cleanup got missed due to a
+        race between overlapping stop_generation() calls), give up waiting so the system
+        can self-recover instead of leaving every subsequent LLM call permanently aborted.
+        The cancellation token itself is never cleared here - it belongs to the generation
+        that created it and stays set for that generation's lifetime; the next call to
+        generate_response() creates a fresh token, so a timed-out wait can no longer let a
+        stale generation see cancellation as lifted.
         """
-        self.__stop_generation.set()
+        stop_event = self.__stop_generation
+        if stop_event:
+            stop_event.set()
+        wait_start = time.time()
         while self.__is_generating:
+            if time.time() - wait_start > 5:
+                logger.warning('stop_generation() timed out waiting for is_generating to clear - giving up the wait, but the stale generation\'s cancellation token stays set.')
+                break
             time.sleep(0.01)
-        self.__stop_generation.clear()
         return
 
     def stop_external_playback(self):
@@ -277,8 +300,12 @@ class ChatManager:
             messages.add_message(tool_result_message)
     
     @utils.time_it
-    async def process_response(self, active_character: Character, blocking_queue: SentenceQueue, messages : message_thread, characters: Characters, actions: list[Action], tools: list[dict] | None, game: Gameable | None = None):
+    async def process_response(self, active_character: Character, blocking_queue: SentenceQueue, messages : message_thread, characters: Characters, actions: list[Action], tools: list[dict] | None, stop_event: asyncio.Event | None = None, game: Gameable | None = None):
         """Stream response from LLM one sentence at a time"""
+        if stop_event is None:
+            # generate_response() always passes its own per-generation token; this
+            # fallback only matters for callers (e.g. tests) invoking this directly.
+            stop_event = asyncio.Event()
         with create_span_from_thread("process_response") as span:
             span.set_attribute("active_character.name", active_character.name)
 
@@ -328,10 +355,14 @@ class ChatManager:
                 active_client = self._get_per_character_client(active_character) if not is_multi_npc else self.__client
 
                 while not has_text_response and retries < max_retries:
+                    stopped_early = False
                     try:
                         start_time = time.time()
-                        async for item in active_client.streaming_call(messages=messages, is_multi_npc=is_multi_npc, tools=current_tools):
-                            if self.__stop_generation.is_set():
+                        agen = active_client.streaming_call(messages=messages, is_multi_npc=is_multi_npc, tools=current_tools)
+                        async for item in agen:
+                            if stop_event.is_set():
+                                stopped_early = True
+                                await agen.aclose()
                                 break
                             if not item:
                                 continue
@@ -441,6 +472,8 @@ class ChatManager:
                                             blocking_queue.put(new_sentence)
                                             parsed_sentence = None
                                 if settings.stop_generation:
+                                    stopped_early = True
+                                    await agen.aclose()
                                     break
                                 if settings.interrupting_action:
                                     # If there is an interrupting action, stop the generation after the next sentence
@@ -472,13 +505,34 @@ class ChatManager:
                             self.__discarded_character_name = settings.discarded_character_name
                             logger.log(self.loglevel, f"LLM addressed unrecognized character '{settings.discarded_character_name}'")
 
+                        if not has_text_response and not collected_tool_calls and not stopped_early:
+                            # The LLM stream was consumed to natural completion (not aborted via
+                            # stop_generation) but produced neither text nor a tool call - a
+                            # genuinely empty completion, seen intermittently from providers even
+                            # without an error. The generator is already fully exhausted here
+                            # (not merely abandoned), so _generation_lock is guaranteed released
+                            # before we retry. Retry like a normal failure instead of silently
+                            # accepting a blank response.
+                            retries += 1
+                            logger.log(23, f"LLM returned an empty response with no error (attempt {retries}/{max_retries}).")
+                            if retries >= max_retries:
+                                logger.log(self.loglevel, f"Max retries reached ({retries}).")
+                                break
+                            logger.log(self.loglevel, 'Retrying due to empty LLM response...')
+                            await asyncio.sleep(1)
+                            continue
+
                         break  # Got text response or hit an error, exit loop
                                 
                     except Exception as e:
+                        try:
+                            await agen.aclose()
+                        except Exception:
+                            pass
                         retries += 1
                         utils.play_error_sound()
                         logger.error(f"LLM API Error: {e}")
-                        
+
                         error_response = "I can't find the right words at the moment."
                         new_sentence = self.generate_sentence(SentenceContent(active_character, error_response, SentenceTypeEnum.SPEECH, True))
                         blocking_queue.put(new_sentence)

@@ -216,21 +216,21 @@ class XTTS(TTSable):
             raise TTSServiceFailure('Local XTTS server launch is only supported on Windows. Please start the server manually.')
         try:
             # Start the server
-            command = f'{self.__xtts_server_path}\\xtts-api-server-mantella.exe'
-    
+            command = [f'{self.__xtts_server_path}\\xtts-api-server-mantella.exe']
+
             # Check if deepspeed should be enabled
             if self.__xtts_default_model:
-                command += (f" --version {self.__xtts_default_model}")
+                command += ['--version', self.__xtts_default_model]
             if self.__xtts_deepspeed:
-                command += ' --deepspeed'
+                command += ['--deepspeed']
             if self.__xtts_device == "cpu":
-                command += ' --device cpu'
+                command += ['--device', 'cpu']
             if self.__xtts_device == "cuda":
-                command += ' --device cuda'
+                command += ['--device', 'cuda']
             if self.__xtts_lowvram:
-                command += ' --lowvram'
+                command += ['--lowvram']
 
-            Popen(command, cwd=self.__xtts_server_path, stdout=None, stderr=None, shell=True)
+            Popen(command, cwd=self.__xtts_server_path, stdout=None, stderr=None, shell=False)
             # Wait for the server to be up and running
             server_ready = False
             for _ in range(180):  # try for up to three minutes

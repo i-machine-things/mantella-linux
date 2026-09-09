@@ -238,28 +238,40 @@ class ChatManager:
         if(not characters.last_added_character):
             return
         self.__is_generating = True
-        
-        asyncio.run(self.process_response(characters.last_added_character, blocking_queue, messages, characters, actions, tools, game))
-    
+
+        # Each generation gets its own cancellation token instead of reusing one shared
+        # Event. A stale generation that's merely slow (not truly stuck) must keep seeing
+        # its own token as cancelled even if a bounded stop_generation() wait times out and
+        # gives up early on a *different* (newer) generation - sharing one Event across
+        # calls let a resumed, already-cancelled coroutine mutate shared state as if it had
+        # never been cancelled.
+        my_stop_event = asyncio.Event()
+        self.__stop_generation = my_stop_event
+
+        asyncio.run(self.process_response(characters.last_added_character, blocking_queue, messages, characters, actions, tools, my_stop_event, game))
+
     @utils.time_it
     def stop_generation(self):
         """Stops the current generation and only returns once this stop has been successful
 
         Bounded to avoid ever blocking forever: if __is_generating doesn't drop back to
         False within a few seconds (e.g. a prior generation's cleanup got missed due to a
-        race between overlapping stop_generation() calls), give up waiting and clear the
-        stop-generation event anyway so the system can self-recover instead of leaving
-        every subsequent LLM call permanently aborted on its first chunk.
+        race between overlapping stop_generation() calls), give up waiting so the system
+        can self-recover instead of leaving every subsequent LLM call permanently aborted.
+        The cancellation token itself is never cleared here - it belongs to the generation
+        that created it and stays set for that generation's lifetime; the next call to
+        generate_response() creates a fresh token, so a timed-out wait can no longer let a
+        stale generation see cancellation as lifted.
         """
-        self.__stop_generation.set()
+        stop_event = self.__stop_generation
+        if stop_event:
+            stop_event.set()
         wait_start = time.time()
         while self.__is_generating:
             if time.time() - wait_start > 5:
-                logger.warning('stop_generation() timed out waiting for is_generating to clear - forcing reset to avoid a stuck state.')
-                self.__is_generating = False
+                logger.warning('stop_generation() timed out waiting for is_generating to clear - giving up the wait, but the stale generation\'s cancellation token stays set.')
                 break
             time.sleep(0.01)
-        self.__stop_generation.clear()
         return
 
     def stop_external_playback(self):
@@ -288,7 +300,7 @@ class ChatManager:
             messages.add_message(tool_result_message)
     
     @utils.time_it
-    async def process_response(self, active_character: Character, blocking_queue: SentenceQueue, messages : message_thread, characters: Characters, actions: list[Action], tools: list[dict] | None, game: Gameable | None = None):
+    async def process_response(self, active_character: Character, blocking_queue: SentenceQueue, messages : message_thread, characters: Characters, actions: list[Action], tools: list[dict] | None, stop_event: asyncio.Event, game: Gameable | None = None):
         """Stream response from LLM one sentence at a time"""
         with create_span_from_thread("process_response") as span:
             span.set_attribute("active_character.name", active_character.name)
@@ -344,7 +356,7 @@ class ChatManager:
                         start_time = time.time()
                         agen = active_client.streaming_call(messages=messages, is_multi_npc=is_multi_npc, tools=current_tools)
                         async for item in agen:
-                            if self.__stop_generation.is_set():
+                            if stop_event.is_set():
                                 stopped_early = True
                                 await agen.aclose()
                                 break

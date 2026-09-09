@@ -82,6 +82,11 @@ This note was created based on issues encountered with PyInstaller executables r
 
 - **Never bind a socket to the IPv6/IPv4 wildcard (`::` / `0.0.0.0`) just to get dual-stack behavior.** `("::", port)` with `IPV6_V6ONLY=0` listens on every network interface, not just loopback — exposing local-only APIs (and any credentials they proxy) to the whole LAN. For loopback-only dual-stack, bind two explicit sockets (`127.0.0.1` and `::1`) and pass both to the server (e.g. `uvicorn.Server(config).run(sockets=[sock_v4, sock_v6])`), rather than one wildcard socket.
 
+## Async/Concurrency Patterns
+
+- **Don't share one mutable cancellation flag/Event across sequential async operations.** If a "stop the current work" mechanism (e.g. a `threading.Lock` + `asyncio.Event` combo) reuses the same Event object across calls, a bounded/timed-out wait that gives up early and clears it can let a stale-but-still-running operation see cancellation as lifted and resume mutating shared state. Give each operation its own fresh cancellation token (create a new `asyncio.Event()` per call, pass it through explicitly) instead of clearing/reusing a shared one.
+- **A bounded wait-then-give-up loop should never also silently reset the state it's waiting on** (e.g. forcing a shared `is_generating` flag back to `False` after a timeout) — that can mask a genuinely stuck task and let its later side effects land unexpectedly. Give up waiting, but leave the underlying state alone.
+
 ## General Style Notes
 
 - **Keep lines under 120 characters.** Long lines are hard to review side-by-side in a diff or split editor pane, and tend to signal a line doing too many things at once. Wrap or break up expressions rather than letting them run long.

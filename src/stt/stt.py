@@ -470,16 +470,6 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
         # Process with VAD
         probability = self.vad.process(chunk)
 
-        # TEMP DEBUG: raw VAD probability trace, ~2x/sec, for diagnosing in-game
-        # STT failures. Remove after the audio-detection issue is resolved.
-        self.__vad_debug_counter = getattr(self, '_Transcriber__vad_debug_counter', 0) + 1
-        if self.__vad_debug_counter % 15 == 0:
-            try:
-                with open('/tmp/vad_debug.log', 'a') as f:
-                    f.write(f"{time.time():.2f} prob={probability:.3f} threshold={self.audio_threshold} speech_detected={self._speech_detected}\n")
-            except Exception:
-                pass
-
         if probability > self.audio_threshold:
             self._last_update_time = time.time()
 

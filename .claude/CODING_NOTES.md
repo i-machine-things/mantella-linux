@@ -87,6 +87,10 @@ This note was created based on issues encountered with PyInstaller executables r
 - **Don't share one mutable cancellation flag/Event across sequential async operations.** If a "stop the current work" mechanism (e.g. a `threading.Lock` + `asyncio.Event` combo) reuses the same Event object across calls, a bounded/timed-out wait that gives up early and clears it can let a stale-but-still-running operation see cancellation as lifted and resume mutating shared state. Give each operation its own fresh cancellation token (create a new `asyncio.Event()` per call, pass it through explicitly) instead of clearing/reusing a shared one.
 - **A bounded wait-then-give-up loop should never also silently reset the state it's waiting on** (e.g. forcing a shared `is_generating` flag back to `False` after a timeout) — that can mask a genuinely stuck task and let its later side effects land unexpectedly. Give up waiting, but leave the underlying state alone.
 
+## Predictable Temp File Paths
+
+- **Never write debug/scratch files to a fixed, predictable path under `/tmp`** (e.g. `/tmp/foo_debug.log`). A local attacker can pre-create a FIFO or symlink there first, and `open(path, "a")` can then block indefinitely or write through the symlink to somewhere unintended (CWE-377). Use `tempfile.NamedTemporaryFile`/`mkstemp`, or better: delete temporary debug logging entirely once the issue it was added for is resolved, rather than leaving it in place.
+
 ## General Style Notes
 
 - **Keep lines under 120 characters.** Long lines are hard to review side-by-side in a diff or split editor pane, and tend to signal a line doing too many things at once. Wrap or break up expressions rather than letting them run long.
